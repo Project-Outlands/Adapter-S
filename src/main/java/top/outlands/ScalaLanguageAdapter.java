@@ -1,4 +1,4 @@
-package com.cleanroommc.scalar;
+package top.outlands;
 
 import net.minecraftforge.fml.common.*;
 import net.minecraftforge.fml.relauncher.Side;
@@ -45,7 +45,7 @@ public class ScalaLanguageAdapter implements ILanguageAdapter {
         catch (ClassNotFoundException e)
         {
             // Not a singleton, look for @Instance field as a fallback.
-            ScalarLoadingPlugin.LOGGER.info("An error occurred trying to load a proxy into {}.{}. Did you declare your mod as 'class' instead of 'object'?", proxyTarget.getSimpleName(), target.getName(), e);
+            AdapterS.LOGGER.info("An error occurred trying to load a proxy into {}.{}. Did you declare your mod as 'class' instead of 'object'?", proxyTarget.getSimpleName(), target.getName(), e);
             return;
         }
 
@@ -81,12 +81,12 @@ public class ScalaLanguageAdapter implements ILanguageAdapter {
         }
         catch (InvocationTargetException e)
         {
-            ScalarLoadingPlugin.LOGGER.error("An error occurred trying to load a proxy into {}.{}", proxyTarget.getSimpleName(), target.getName(), e);
+            AdapterS.LOGGER.error("An error occurred trying to load a proxy into {}.{}", proxyTarget.getSimpleName(), target.getName(), e);
             throw new LoaderException(e);
         }
 
         // If we come here we could not find a setter for this proxy.
-        ScalarLoadingPlugin.LOGGER.fatal("Failed loading proxy into {}.{}, could not find setter function. Did you declare the field with 'val' instead of 'var'?", proxyTarget.getSimpleName(), target.getName());
+        AdapterS.LOGGER.fatal("Failed loading proxy into {}.{}, could not find setter function. Did you declare the field with 'val' instead of 'var'?", proxyTarget.getSimpleName(), target.getName());
         throw new LoaderException(String.format("Failed loading proxy into %s.%s, could not find setter function. Did you declare the field with 'val' instead of 'var'?", proxyTarget.getSimpleName(), target.getName()));
     }
 
@@ -130,14 +130,14 @@ public class ScalaLanguageAdapter implements ILanguageAdapter {
 
                         if (!target.getType().isAssignableFrom(proxy.getClass()))
                         {
-                            ScalarLoadingPlugin.LOGGER.fatal("Attempted to load a proxy type {} into {}.{}, but the types don't match", targetType, proxyTarget.getSimpleName(), target.getName());
+                            AdapterS.LOGGER.fatal("Attempted to load a proxy type {} into {}.{}, but the types don't match", targetType, proxyTarget.getSimpleName(), target.getName());
                             throw new LoaderException(String.format("Attempted to load a proxy type %s into %s.%s, but the types don't match", targetType, proxyTarget.getSimpleName(), target.getName()));
                         }
 
                         setProxy(target, proxyTarget, proxy);
                     }
                     catch (Exception e) {
-                        ScalarLoadingPlugin.LOGGER.error("An error occurred trying to load a proxy into {}.{}", proxyTarget.getSimpleName(), target.getName(), e);
+                        AdapterS.LOGGER.error("An error occurred trying to load a proxy into {}.{}", proxyTarget.getSimpleName(), target.getName(), e);
                         throw new LoaderException(e);
                     }
                 }
@@ -145,7 +145,7 @@ public class ScalaLanguageAdapter implements ILanguageAdapter {
         }
         else
         {
-            ScalarLoadingPlugin.LOGGER.trace("Mod does not appear to be a singleton.");
+            AdapterS.LOGGER.trace("Mod does not appear to be a singleton.");
         }
     }
 }

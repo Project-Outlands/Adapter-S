@@ -1,30 +1,55 @@
-apply from: 'gradle/scripts/helpers.gradle'
+if (publish_to_maven.toBoolean()) {
+    // The Maven artifact is the *development* dependency, not the release jar. It carries the compiled output from src
+    // plus the declarative mcmod.info, and deliberately no jarjar: a consumer resolves the official Scala runtime from
+    // Central Maven through the coordinates below. The player-facing jar (remapJar) still bundles those libraries and is
+    // published as a GitHub release, not here.
+    tasks.matching { it.name == 'generateMetadataFileForMavenJavaPublication' }.configureEach {
+        // The publication has no java component, so module metadata would either be skipped or - worse - describe an
+        // artifact without the dependencies added below. POM-only is what this artifact is.
+        enabled = false
+    }
 
-setDefaultProperty('publish_to_maven', true, false)
-
-if (propertyBool('publish_to_maven')) {
-    assertProperty('maven_name')
-    assertProperty('maven_url')
     publishing {
         repositories {
             maven {
-                name propertyString('maven_name').replaceAll("\\s", "")
-                url propertyString('maven_url')
+                name = maven_name.replaceAll("\\s", "")
+                url = maven_url
                 credentials(PasswordCredentials)
             }
         }
         publications {
             mavenJava(MavenPublication) {
-                from components.java // Publish with standard artifacts
-                setGroupId(propertyString('root_package'))// Publish with root package as maven group
-                setArtifactId(propertyString('mod_id')) // Publish artifacts with mod id as the artifact id
+                // `jar` is the pre-remap compiled output, i.e. exactly "src's compilation output plus the declarative
+                // resources". Publishing it with no classifier makes it the main artifact; `remapJar` stays out because
+                // it is the jarjar release artifact.
+                artifact(tasks.named('jar')) {
+                    classifier = null
+                }
+                if (generate_sources_jar.toBoolean()) {
+                    artifact(tasks.named('sourcesJar'))
+                }
+                if (generate_javadocs_jar.toBoolean()) {
+                    artifact(tasks.named('javadocJar'))
+                }
 
-                // Custom artifact:
-                // If you want to publish a different artifact to the one outputted when building normally
-                // Create a different gradle task (Jar task), in extra.gradle
-                // Remove the 'from components.java' line above
-                // Add this line (change the task name):
-                // artifacts task_name
+                setGroupId(root_package)// Publish with root package as maven group
+                setArtifactId(mod_id) // Publish artifacts with mod id as the artifact id
+
+                // The libraries the release jar bundles are ordinary Maven dependencies here. Compile scope on purpose:
+                // a mod written in Scala compiles against the language library as well as running against it.
+                pom.withXml {
+                    def dependencies = asNode().appendNode('dependencies')
+                    configurations.api.dependencies.each { dependency ->
+                        if (dependency.group == null || dependency.version == null) {
+                            return
+                        }
+                        def entry = dependencies.appendNode('dependency')
+                        entry.appendNode('groupId', dependency.group)
+                        entry.appendNode('artifactId', dependency.name)
+                        entry.appendNode('version', dependency.version)
+                        entry.appendNode('scope', 'compile')
+                    }
+                }
             }
         }
     }

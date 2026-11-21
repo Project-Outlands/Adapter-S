@@ -1,59 +1,61 @@
-import org.jetbrains.gradle.ext.Gradle 
-
 plugins {
     id 'java'
     id 'java-library'
     id 'maven-publish'
+    id 'com.gradleup.shadow' version '9.6.1'
     id 'org.jetbrains.gradle.plugin.idea-ext' version '1.4.1'
-    id 'org.jetbrains.changelog' version '2.2.1'
-    id 'xyz.wagyourtail.unimined' version '1.4.43-kappa'
+    id 'top.outlands.unimined' version '1.4.47'
+    id 'net.kyori.blossom' version '2.2.0'
 }
 
-apply from: 'gradle/scripts/helpers.gradle'
+import org.jetbrains.gradle.ext.Gradle
 
-// Early Assertions
-assertProperty 'mod_version'
-assertProperty 'root_package'
-assertProperty 'mod_id'
-assertProperty 'mod_name'
+ext {
+    //noinspection GroovyAssignabilityCheck
+    // Where an access transformer sits inside the jar, relative to META-INF/: the loader opens exactly that path, and
+    // the jar section below declares the same string. The file itself lives at the same path under src/main/resources.
+    access_transformer_locations = "${mod_id}_at.cfg"
+}
 
-injectTags()
+// The property has always been allowed to name more than one file, and both the jar section and the processResources
+// placement have to agree on the list, so it is split once, here.
+def accessTransformerLocations = access_transformer_locations.trim().split('\\s+').findAll { !it.isBlank() }
 
-assertSubProperties 'use_access_transformer', 'access_transformer_locations'
-assertSubProperties 'is_coremod', 'coremod_includes_mod', 'coremod_plugin_class_name'
-assertSubProperties 'use_asset_mover', 'asset_mover_version'
-
-setDefaultProperty 'generate_sources_jar', true, false
-setDefaultProperty 'generate_javadocs_jar', true, false
-setDefaultProperty 'minecraft_username', true, 'Developer'
-setDefaultProperty 'extra_jvm_args', false, ''
-
-version = "${propertyString('mod_version')}"
-group = propertyString('root_package')
+version = mod_version
+group = root_package
 
 base {
-    archivesName = propertyString('mod_id')
+    archivesName = mod_id
 }
-
 
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(25)
     }
-    if (propertyBool('generate_sources_jar')) {
+    if (generate_sources_jar.toBoolean()) {
         withSourcesJar()
     }
-    if (propertyBool('generate_javadocs_jar')) {
+    if (generate_javadocs_jar.toBoolean()) {
         withJavadocJar()
     }
 }
 
 configurations {
-    embed
-    contain
-    implementation.extendsFrom(embed)
+    modCompileOnly
+    compileOnly.extendsFrom(modCompileOnly)
+    modRuntimeOnly
+    runtimeOnly.extendsFrom(modRuntimeOnly)
 }
 
+def remapTaskName = enable_shadow.toBoolean() ? "remapShadowJar" : "remapJar"
+
+// The published Maven artifact is the provider's own compiled output, not the jarjar release jar, so the Scala runtime
+// is declared as ordinary Maven dependencies on it (see publishing.gradle). Unimined's default POM cleaning exists to
+// strip leaked remapped-mod coordinates; this project has no remapped mod dependencies, and the coordinates it does
+// publish (org.scala-lang:*) are exactly the ones a development consumer should inherit.
+unimined.cleanModPom = false
+
+//noinspection GroovyAssignabilityCheck
 unimined.minecraft {
     version "1.12.2"
 
@@ -61,93 +63,101 @@ unimined.minecraft {
         mcp("stable", "39-1.12")
     }
 
-    cleanroom {
-        if (propertyBool('use_access_transformer')) {
-            accessTransformer "src/main/resources/META-INF/${propertyString('access_transformer_locations')}"
+    outlands {
+        if (use_access_transformer.toBoolean()) {
+            // A development run applies one access transformer - Unimined rewrites Minecraft against it - while the jar
+            // can carry several. A second location therefore widens classes only in the built mod.
+            accessTransformer "src/main/resources/${accessTransformerLocations[0]}"
         }
-        loader "0.6.13-alpha"
-        runs.config("client") {
-            jvmArgs extra_jvm_args
+        // The jar-level facts live in the mcmod.info `jar` section, not in the manifest. Every value here comes from a
+        // build property, which is why it belongs to the build: keeping it in a metadata file would mean two places to
+        // keep in step.
+        jarMetadata {
+            license mod_license
+            if (is_coremod.toBoolean()) {
+                coreMod coremod_plugin_class_name
+                alsoMod coremod_includes_mod.toBoolean()
+            }
+            if (use_access_transformer.toBoolean()) {
+                at(*accessTransformerLocations)
+            }
         }
-        runs.config("server") {
-            jvmArgs extra_jvm_args
+        loader "2026.11.21"
+        runs.all {
+            args += ['--username', minecraft_username]
+            def extraArgs = extra_jvm_args
+            if (extraArgs != null && !extraArgs.trim().isEmpty()) {
+                jvmArgs += extraArgs.split { "\\s+" }.toList()
+            }
+            if (enable_foundation_debug.toBoolean()) {
+                systemProperty("foundation.dump", "true")
+                systemProperty("foundation.verbose", "true")
+            }
+            if (is_coremod.toBoolean()) {
+                systemProperty("fml.coreMods.load", coremod_plugin_class_name)
+            }
+            return
         }
-        runs.auth.username = minecraft_username
     }
 
+    defaultRemapJar = false
+    
+    String jarTaskName = enable_shadow.toBoolean() ? "shadowJar" : "jar"
+    
+    remap(tasks.named(jarTaskName).get())
 
-}
-
-repositories {
-    maven {
-        name 'CleanroomMC Maven'
-        url 'https://maven.cleanroommc.com'
+    mods {
+        remap(configurations.modCompileOnly)
+        remap(configurations.modRuntimeOnly)
     }
 }
 
 dependencies {
-    if (propertyBool('use_asset_mover')) {
-        implementation "com.cleanroommc:assetmover:${propertyString('asset_mover_version')}"
+    if (use_asset_mover.toBoolean()) {
+        implementation "com.cleanroommc:assetmover:${asset_mover_version}"
+    }
+    if (enable_junit_testing.toBoolean()) {
+        testImplementation 'org.junit.jupiter:junit-jupiter:6.0.3'
+        testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     }
 }
 
 apply from: 'gradle/scripts/dependencies.gradle'
 
 processResources {
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-    inputs.property 'mod_id', propertyString('mod_id')
-    inputs.property 'mod_name', propertyString('mod_name')
-    inputs.property 'mod_version', propertyString('mod_version')
-    inputs.property 'mod_description', propertyString('mod_description')
-    inputs.property 'mod_authors', "${propertyStringList('mod_authors', ',').join(', ')}"
-    inputs.property 'mod_credits', propertyString('mod_credits')
-    inputs.property 'mod_url', propertyString('mod_url')
-    inputs.property 'mod_update_json', propertyString('mod_update_json')
-    inputs.property 'mod_logo_path', propertyString('mod_logo_path')
-
-    def filterList = ['mcmod.info', 'pack.mcmeta']
-
-    filesMatching(filterList) { fcd ->
-        fcd.expand(
-                'mod_id': propertyString('mod_id'),
-                'mod_name': propertyString('mod_name'),
-                'mod_version': propertyString('mod_version'),
-                'mod_description': propertyString('mod_description'),
-                'mod_authors': "${propertyStringList('mod_authors', ',').join(', ')}",
-                'mod_credits': propertyString('mod_credits'),
-                'mod_url': propertyString('mod_url'),
-                'mod_update_json': propertyString('mod_update_json'),
-                'mod_logo_path': propertyString('mod_logo_path'),
-        )
-    }
-
-}
-
-jar {
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-    if (configurations.contain.size() > 0) {
-        into('/') {
-            from configurations.contain
+    // The loader opens an access transformer as `META-INF/<declared path>`, so the declared location decides where the
+    // file lands: a name pattern (`_at.cfg`) would stop matching the moment someone sets a custom location, and the jar
+    // would then declare an entry it does not contain.
+    if (use_access_transformer.toBoolean()) {
+        accessTransformerLocations.each { location ->
+            filesMatching(location) { it.path = "META-INF/${it.path}" }
         }
     }
-    doFirst{
-        manifest {
-            def attribute_map = [:]
-            attribute_map['ModType'] = "CRL"
-            if (configurations.contain.size() > 0) {
-                attribute_map['ContainedDeps'] = configurations.contain.collect { it.name }.join(' ')
-                attribute_map['NonModDeps'] = true
+}
+
+sourceSets {
+    main {
+        blossom {
+            javaSources {
+                property('mod_id', mod_id)
+                property('mod_name', mod_name)
+                property('mod_version', mod_version)
+                property('package', root_package)
             }
-            if (propertyBool('is_coremod')) {
-                attribute_map['FMLCorePlugin'] = propertyString('coremod_plugin_class_name')
-                if (propertyBool('coremod_includes_mod')) {
-                    attribute_map['FMLCorePluginContainsFMLMod'] = true
-                }
+            resources {
+                property('mod_id', mod_id)
+                property('mod_name', mod_name)
+                property('mod_version', mod_version)
+                property('scala_version', scala_version)
+                property('mod_license', mod_license)
+                property('mod_description', mod_description)
+                property('mod_authors', mod_authors.toString().split(',').findAll { !it.isBlank() }.collect { "\"${it.strip()}\"" }.join(', '))
+                property('mod_credits', mod_credits)
+                property('mod_url', mod_url)
+                property('mod_update_json', mod_update_json)
+                property('mod_logo_path', mod_logo_path)
+                property('mod_issue_tracker', mod_issue_tracker)
             }
-            if (propertyBool('use_access_transformer')) {
-                attribute_map['FMLAT'] = propertyString('access_transformer_locations')
-            }
-            attributes(attribute_map)
         }
     }
 }
@@ -159,29 +169,49 @@ idea {
     project {
         settings {
             runConfigurations {
-                "1. Run Client"(Gradle) {
+                '1. Build'(Gradle) {
+                    taskNames = ["build"]
+                }
+                '2. Run Client'(Gradle) {
                     taskNames = ["runClient"]
                 }
-                "2. Run Server"(Gradle) {
+                '3. Run Server'(Gradle) {
                     taskNames = ["runServer"]
-                }
-                "3. Run Obfuscated Client"(Gradle) {
-                    taskNames = ["runObfClient"]
-                }
-                "4. Run Obfuscated Server"(Gradle) {
-                    taskNames = ["runObfServer"]
                 }
             }
             compiler.javac {
                 afterEvaluate {
-                    javacAdditionalOptions = "-encoding utf8"
+                    javacAdditionalOptions = '-encoding utf8'
                     moduleJavacAdditionalOptions = [
-                            (project.name + ".main"): tasks.compileJava.options.compilerArgs.collect { '"' + it + '"' }.join(' ')
+                            (project.name + '.main'): tasks.compileJava.options.compilerArgs.collect { "\"${it}\"" }.join(' ')
                     ]
                 }
             }
+            taskTriggers {
+                beforeSync tasks.named("genSources")
+            }
         }
     }
+}
+
+if (!enable_shadow.toBoolean()) {
+    shadowJar.enabled = false
+}
+
+compileJava {
+    sourceCompatibility = targetCompatibility = JavaVersion.VERSION_25
+}
+
+jar {
+    archiveClassifier = 'dev'
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    finalizedBy(tasks.named(remapTaskName).get())
+}
+
+shadowJar {
+    //noinspection GroovyAssignabilityCheck,GroovyAccessibility
+    configurations = [project.configurations.shadow]
+    archiveClassifier = "shadow"
 }
 
 compileTestJava {
@@ -193,22 +223,9 @@ test {
     javaLauncher.set(javaToolchains.launcherFor {
         languageVersion = JavaLanguageVersion.of(25)
     })
-    if (propertyBool('show_testing_output')) {
+    if (show_testing_output.toBoolean()) {
         testLogging {
             showStandardStreams = true
-        }
-    }
-}
-
-
-def injectTags() {
-    var target = new File("${rootProject.projectDir}/src/main/java/${root_package.replace('.', '/')}/${mod_id}/Reference.java")
-    var template = new File("${rootProject.projectDir}/template/Reference.java")
-    var replaceMap = [$mod_id : mod_id, $mod_name : mod_name, $mod_version : mod_version]
-    target.withWriter { var writer ->
-        template.eachLine { var line ->
-            replaceMap.each {if (line.contains(it.key)) line = line.replace(it.key, it.value)}
-            writer.write(line + "\n");
         }
     }
 }
@@ -216,7 +233,6 @@ def injectTags() {
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
 }
-
 
 apply from: 'gradle/scripts/publishing.gradle'
 apply from: 'gradle/scripts/extra.gradle'

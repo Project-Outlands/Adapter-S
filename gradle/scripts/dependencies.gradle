@@ -1,39 +1,54 @@
-apply from: 'gradle/scripts/helpers.gradle'
-
 repositories {
+    // Central artifacts come from Aliyun's mirror and everything else from the jsdu mirror that also backs
+    // repo.cleanroommc.com (forge, mcp and Outlands' releases are all proxied there). Both are moved to the front after
+    // this block, because the Unimined plugin appends its own repositories while `unimined.minecraft {}` is evaluated.
+    maven {
+        name = 'CentralMirror'
+        url = 'https://maven.aliyun.com/repository/central/'
+    }
+    maven {
+        name = 'OutlandsMirror'
+        url = 'https://nexus.jsdu.cn/repository/'
+    }
+    maven {
+        name = 'CurseMaven'
+        url = 'https://cursemaven.com'
+    }
+    maven {
+        name = 'CleanroomCurseMaven'
+        url = 'https://curse.cleanroommc.com'
+    }
+    maven {
+        name = 'Modrinth'
+        url = 'https://api.modrinth.com/maven'
+    }
     mavenCentral()
-    // Other repositories described by default:
-    // CleanroomMC: https://maven.cleanroommc.com
-    maven {
-        name 'CurseMaven'
-        url 'https://cursemaven.com'
+
+    // Repository order is declaration order in Gradle, and the mirrors are declared before the plugin adds its own.
+    ['CentralMirror', 'OutlandsMirror'].reverseEach { name ->
+        def mirror = repositories.findByName(name)
+        repositories.remove(mirror)
+        repositories.addFirst(mirror)
     }
-    maven {
-        name 'Modrinth'
-        url 'https://api.modrinth.com/maven'
-    }
-    mavenLocal() // Must be last for caching to work
 }
 
 dependencies {
-    compileOnly "com.cleanroommc:lwjglx:1.0.0"
-
-
-    contain "org.scala-lang:scala-library:${mod_version}"
-    contain ('org.scala-lang.modules:scala-parser-combinators_3:2.5.0') {
-        transitive = false
+    if (enable_lwjglx.toBoolean()) {
+        compileOnly "com.cleanroommc:lwjglx:1.0.0"
     }
-    contain("org.scala-lang:scala3-tasty-inspector_3:${mod_version}") {
-        transitive = false
-    }
+
+    // Adapter-S's whole job is to put a Scala runtime on the class path before mods written in Scala are constructed.
+    // `contained(...)` makes Unimined copy the resolved artifact to META-INF/libraries and declare it in the
+    // mcmod.info jar section as a LIB - the declarative replacement for the old `ContainedDeps` manifest attribute.
+    // Wrapping the declaration rather than naming it again elsewhere is what keeps the packed version the one the
+    // code was compiled against.
+    api contained("org.scala-lang:scala-library:${scala_version}")
+    api contained("org.scala-lang.modules:scala-parser-combinators_3:${scala_parser_combinators_version}")
+    api contained("org.scala-lang:scala3-tasty-inspector_3:${scala_version}")
+
     // Example - Dependency descriptor:
     // 'com.google.code.gson:gson:2.8.6' << group: com.google.code.gson, name:gson, version:2.8.6
     // 'group:name:version:classifier' where classifier is optional
-
-    // Example - Deobfuscating dependencies:
-    // rfg.deobf('curse.maven:had-enough-items-557549:4543375')
-    // By wrapping a dependency descriptor in rfg.deobf() method call, the dependency is queued for deobfuscation
-    // When deobfuscating, RFG respects the mapping_channel + mapping_version stated in gradle.properties
 
     // Example - CurseMaven dependencies:
     // 'curse.maven:had-enough-items-557549:4543375' << had-enough-items = project slug, 557549 = project id, 4543375 = file id
@@ -48,8 +63,11 @@ dependencies {
     // runtimeOnly = runtime dependency
     // compileOnly = compile time dependency
     // annotationProcessor = annotation processing dependencies
-    // contain = bundle dependency jars into final artifact, will extract them in mod loading. Please only do this to non-mod dependencies.
+    // contain = bundle a dependency jar into the final artifact; the supported spelling is `contained(...)` above
     // shadow = bundle dependencies into shadow output artifact (relocation configurable in shadowJar task)
+    // modImplementation = mod dependency available at both compile time and runtime
+    // modCompileOnly = mod dependency available only at compile time
+    // modLibrary = won't be remap but will be forced injected into classpath later
 
     // Transitive dependencies:
     // (Dependencies that your dependency depends on)
