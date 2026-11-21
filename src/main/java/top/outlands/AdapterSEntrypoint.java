@@ -1,6 +1,7 @@
 package top.outlands;
 
 import net.minecraftforge.fml.common.EntrypointRegistrar;
+import net.minecraftforge.fml.common.FMLLog;
 import net.minecraftforge.fml.common.IDeclarativeEntrypoint;
 
 /**
@@ -15,6 +16,6 @@ public final class AdapterSEntrypoint implements IDeclarativeEntrypoint {
 
     @Override
     public void register(EntrypointRegistrar registrar) {
-        AdapterS.LOGGER.info("{} {} is providing the 'scala' language adapter", Reference.MOD_NAME, Reference.VERSION);
+        FMLLog.log.info("{} {} is providing the 'scala' language adapter", Reference.MOD_NAME, Reference.VERSION);
     }
 }
